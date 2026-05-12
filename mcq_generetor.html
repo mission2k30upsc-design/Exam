@@ -4,7 +4,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>MCQ Exam</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Sora:wght@300;400;600;700&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
  
 <style>
   :root {
@@ -909,10 +908,9 @@
     border: 1.5px solid transparent;
   }
 
-  /* ===== YELLOW HIGHLIGHT FOR USER-PICKED IN REVIEW ===== */
   .review-option.user-picked {
-    border-color: var(--warn);
-    background: rgba(251,191,36,0.10);
+    border-color: var(--green);
+    background: rgba(0,255,135,0.07);
   }
 
   .review-option.not-answered {
@@ -936,7 +934,7 @@
   }
 
   .review-option.user-picked .review-opt-letter {
-    background: var(--warn);
+    background: var(--green);
     color: #060b14;
   }
 
@@ -948,7 +946,7 @@
     padding-top: 2px;
   }
 
-  .review-option.user-picked .review-opt-text { color: var(--warn); }
+  .review-option.user-picked .review-opt-text { color: var(--text); }
 
   .review-status-row {
     padding: 4px 16px 12px;
@@ -970,9 +968,9 @@
   }
 
   .review-badge.answered-badge {
-    background: rgba(251,191,36,0.12);
-    color: var(--warn);
-    border: 1px solid rgba(251,191,36,0.35);
+    background: rgba(0,255,135,0.1);
+    color: var(--green);
+    border: 1px solid rgba(0,255,135,0.25);
   }
 
   .review-badge.skipped-badge {
@@ -1102,13 +1100,13 @@
       <div class="stat-box"><span class="val" id="resTime">—</span><span class="lbl">Time</span></div>
     </div>
     <div class="result-actions">
-      <button class="btn-pdf" onclick="downloadPDF()">
+      <button class="btn-pdf" onclick="printResponses()">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
           <polyline points="7 10 12 15 17 10"/>
           <line x1="12" y1="15" x2="12" y2="3"/>
         </svg>
-        Download PDF
+        Print / Save PDF
       </button>
     </div>
   </div>
@@ -1175,51 +1173,6 @@ const LETTERS = ['A','B','C','D'];
 let finalAnswersForReview = [];
 let submittedName = '';
 let submittedTimeMins = 0, submittedTimeSecs = 0;
-
-// ===== BENGALI FONT LOADER FOR PDF =====
-// We use a canvas-based approach to render Bengali text as images in the PDF
-// This ensures perfect Bengali rendering regardless of font support
-
-function renderTextToCanvas(text, fontSize, maxWidth) {
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  const scale = 2; // retina
-  const lineHeight = fontSize * 1.6;
-  ctx.font = `${fontSize}px 'Noto Sans Bengali', 'Mukti', serif`;
-
-  // word wrap
-  const words = text.split(' ');
-  const lines = [];
-  let current = '';
-  for (let w of words) {
-    const test = current ? current + ' ' + w : w;
-    if (ctx.measureText(test).width > maxWidth * scale && current) {
-      lines.push(current);
-      current = w;
-    } else {
-      current = test;
-    }
-  }
-  if (current) lines.push(current);
-
-  canvas.width = maxWidth * scale;
-  canvas.height = (lines.length * lineHeight + 8) * scale;
-  ctx.scale(scale, scale);
-  ctx.font = `${fontSize}px 'Noto Sans Bengali', 'Mukti', serif`;
-  ctx.fillStyle = 'transparent';
-  ctx.fillRect(0, 0, maxWidth, canvas.height / scale);
-  ctx.fillStyle = '#e2eaf4';
-  lines.forEach((line, i) => {
-    ctx.fillText(line, 0, (i + 1) * lineHeight - 4);
-  });
-
-  return { dataUrl: canvas.toDataURL('image/png'), lines: lines.length, lineHeight, canvasWidth: maxWidth, canvasHeight: canvas.height / scale };
-}
-
-// Check if text contains Bengali characters
-function hasBengali(str) {
-  return /[\u0980-\u09FF]/.test(str);
-}
 
 // ===== FETCH EXAM NAME ON PAGE LOAD =====
 (function fetchExamNamePreview() {
@@ -1623,7 +1576,7 @@ function buildReview() {
   section.innerHTML = '<div class="review-heading">Your Responses</div>';
 
   examData.questions.forEach((q, idx) => {
-    const userAns = finalAnswersForReview[idx];
+    const userAns = finalAnswersForReview[idx]; // 'A'/'B'/'C'/'D' | 'N/A' | 'Not Visited'
     const isAnswered = ['A','B','C','D'].includes(userAns);
     const isNA = userAns === 'N/A';
 
@@ -1661,221 +1614,143 @@ function buildReview() {
   });
 }
 
-// ===== DOWNLOAD PDF — Bengali-safe via Canvas rendering =====
-async function downloadPDF() {
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+// ===== PRINT RESPONSES =====
+function printResponses() {
+  const LETTERS = ['A','B','C','D'];
+  const examName = examData.examName || 'MCQ Exam';
+  const answeredCount = document.getElementById('resAnswered').textContent;
+  const skippedCount  = document.getElementById('resSkipped').textContent;
+  const totalCount    = document.getElementById('resTotal').textContent;
+  const timeVal       = document.getElementById('resTime').textContent;
 
-  const pageW = doc.internal.pageSize.getWidth();
-  const pageH = doc.internal.pageSize.getHeight();
-  const margin = 15;
-  const contentW = pageW - margin * 2;
-  let y = margin;
+  let rows = '';
+  examData.questions.forEach((q, idx) => {
+    const userAns  = finalAnswersForReview[idx];
+    const isAns    = ['A','B','C','D'].includes(userAns);
+    const isNA     = userAns === 'N/A';
 
-  // px per mm for canvas rendering (96dpi / 25.4 = ~3.78)
-  const pxPerMm = 3.78;
+    let statusLabel = '';
+    let statusColor = '';
+    if (isAns)       { statusLabel = '✓ Answered: ' + userAns; statusColor = '#fbbf24'; }
+    else if (isNA)   { statusLabel = '⚠ Skipped (N/A)';        statusColor = '#fbbf24'; }
+    else             { statusLabel = '○ Not Visited';           statusColor = '#5a7a9a'; }
 
-  // Helper: add text or image depending on Bengali presence
-  async function addMixedText(text, x, yPos, opts = {}) {
-    if (!text) return 0;
-    const fontSize = opts.fontSize || 10;
-    const color = opts.color || [226, 234, 244];
-    const bold = opts.bold || false;
-    const maxW = opts.maxW || (contentW - (x - margin));
-
-    if (hasBengali(text)) {
-      // Render to canvas, add as image
-      const canvasFontSize = fontSize * 2.2;
-      const maxPx = maxW * pxPerMm;
-      const rendered = renderTextToCanvas(text, canvasFontSize, maxPx);
-      const imgH = rendered.canvasHeight / pxPerMm;
-      const imgW = rendered.canvasWidth / pxPerMm;
-
-      // tint canvas to match color
-      const cnv = document.createElement('canvas');
-      const ctx2 = cnv.getContext('2d');
-      cnv.width = rendered.canvasWidth * 2;
-      cnv.height = rendered.canvasHeight * 2;
-      const img = new Image();
-      await new Promise(res => {
-        img.onload = res;
-        img.src = rendered.dataUrl;
-      });
-      ctx2.drawImage(img, 0, 0);
-
-      // colorize — composite multiply approach
-      ctx2.globalCompositeOperation = 'source-in';
-      ctx2.fillStyle = `rgb(${color[0]},${color[1]},${color[2]})`;
-      ctx2.fillRect(0, 0, cnv.width, cnv.height);
-
-      doc.addImage(cnv.toDataURL('image/png'), 'PNG', x, yPos - fontSize * 0.35, imgW, imgH);
-      return imgH;
-    } else {
-      // Standard jsPDF text
-      doc.setFontSize(fontSize);
-      doc.setTextColor(...color);
-      doc.setFont('helvetica', bold ? 'bold' : 'normal');
-      const lines = doc.splitTextToSize(text, maxW);
-      doc.text(lines, x, yPos);
-      return lines.length * (fontSize * 0.35 + 1.2);
-    }
-  }
-
-  function checkPageBreak(needed) {
-    if (y + needed > pageH - margin) {
-      doc.addPage();
-      y = margin;
-    }
-  }
-
-  // ---- Header ----
-  doc.setFillColor(13, 24, 41);
-  doc.rect(0, 0, pageW, 28, 'F');
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(16);
-  doc.setTextColor(0, 229, 255);
-  doc.text('Mission2K27', margin, 12);
-  doc.setFontSize(10);
-  doc.setTextColor(90, 122, 154);
-
-  // Exam name — may be Bengali
-  if (hasBengali(examData.examName || '')) {
-    const rendered = renderTextToCanvas(examData.examName || 'MCQ Exam', 22, 200 * pxPerMm);
-    const cnv2 = document.createElement('canvas');
-    const ctx3 = cnv2.getContext('2d');
-    const img2 = new Image();
-    cnv2.width = rendered.canvasWidth * 2;
-    cnv2.height = rendered.canvasHeight * 2;
-    await new Promise(r => { img2.onload = r; img2.src = rendered.dataUrl; });
-    ctx3.drawImage(img2, 0, 0);
-    ctx3.globalCompositeOperation = 'source-in';
-    ctx3.fillStyle = 'rgb(90,122,154)';
-    ctx3.fillRect(0, 0, cnv2.width, cnv2.height);
-    doc.addImage(cnv2.toDataURL('image/png'), 'PNG', margin, 14, rendered.canvasWidth / pxPerMm, rendered.canvasHeight / pxPerMm);
-  } else {
-    doc.text(examData.examName || 'MCQ Exam', margin, 20);
-  }
-
-  const statsStr = `Answered: ${document.getElementById('resAnswered').textContent}  |  Skipped: ${document.getElementById('resSkipped').textContent}  |  Time: ${document.getElementById('resTime').textContent}`;
-  doc.setFontSize(9);
-  doc.setTextColor(90, 122, 154);
-  doc.text(statsStr, pageW - margin, 20, { align: 'right' });
-
-  y = 34;
-
-  // Student name
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
-  doc.setTextColor(226, 234, 244);
-  doc.text('Student: ' + submittedName, margin, y);
-  y += 8;
-
-  // Divider
-  doc.setDrawColor(30, 48, 80);
-  doc.setLineWidth(0.5);
-  doc.line(margin, y, pageW - margin, y);
-  y += 6;
-
-  // ---- Questions ----
-  for (let idx = 0; idx < examData.questions.length; idx++) {
-    const q = examData.questions[idx];
-    const userAns = finalAnswersForReview[idx];
-    const isAnswered = ['A','B','C','D'].includes(userAns);
-    const isNA = userAns === 'N/A';
-
-    checkPageBreak(20);
-
-    // Q number label
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(10);
-    doc.setTextColor(0, 229, 255);
-    doc.text('Q' + (idx + 1) + '.', margin, y);
-
-    // Question text
-    const qHeight = await addMixedText(q.question, margin + 10, y, {
-      fontSize: 10,
-      color: [226, 234, 244],
-      maxW: contentW - 12
+    let optsHtml = '';
+    q.options.forEach((opt, oi) => {
+      const letter   = LETTERS[oi];
+      const isPicked = isAns && userAns === letter;
+      optsHtml += `
+        <div style="display:flex;align-items:flex-start;gap:8px;padding:7px 10px;border-radius:7px;margin-bottom:5px;
+          ${isPicked
+            ? 'background:#2a1f00;border:1.5px solid #fbbf24;'
+            : 'background:#111e33;border:1.5px solid transparent;'}">
+          <span style="flex-shrink:0;width:22px;height:22px;display:flex;align-items:center;justify-content:center;
+            border-radius:5px;font-family:monospace;font-size:11px;font-weight:700;
+            ${isPicked ? 'background:#fbbf24;color:#060b14;' : 'background:#1e3050;color:#5a7a9a;'}">
+            ${letter}
+          </span>
+          <span style="font-size:12px;line-height:1.55;padding-top:2px;
+            ${isPicked ? 'color:#fbbf24;font-weight:600;' : 'color:#8ca0b8;'}">
+            ${opt}
+          </span>
+        </div>`;
     });
-    y += Math.max(qHeight, 5) + 3;
 
-    // Options
-    for (let oi = 0; oi < q.options.length; oi++) {
-      const letter = LETTERS[oi];
-      const opt = q.options[oi];
-      const isPicked = isAnswered && userAns === letter;
+    rows += `
+      <div style="background:#0d1829;border:1px solid #1e3050;border-radius:12px;overflow:hidden;margin-bottom:12px;break-inside:avoid;">
+        <div style="display:flex;align-items:flex-start;gap:10px;padding:14px 14px 8px;">
+          <div style="flex-shrink:0;width:26px;height:26px;background:linear-gradient(135deg,#7c3aed,#00e5ff);
+            border-radius:7px;display:flex;align-items:center;justify-content:center;
+            font-family:monospace;font-size:11px;font-weight:700;color:#fff;">
+            ${idx+1}
+          </div>
+          <div style="font-size:13px;line-height:1.65;color:#e2eaf4;flex:1;padding-top:2px;">${q.question}</div>
+        </div>
+        <div style="padding:0 10px 8px;">${optsHtml}</div>
+        <div style="padding:4px 14px 12px;">
+          <span style="display:inline-flex;align-items:center;gap:4px;padding:3px 12px;border-radius:100px;
+            font-size:10px;font-weight:700;font-family:monospace;letter-spacing:.04em;
+            background:${isAns||isNA?'rgba(251,191,36,.12)':'rgba(90,122,154,.1)'};
+            color:${statusColor};
+            border:1px solid ${isAns||isNA?'rgba(251,191,36,.3)':'#1e3050'};">
+            ${statusLabel}
+          </span>
+        </div>
+      </div>`;
+  });
 
-      checkPageBreak(8);
-
-      if (isPicked) {
-        // yellow highlight box
-        doc.setFillColor(80, 65, 0);
-        doc.roundedRect(margin + 6, y - 4, contentW - 6, 9, 1.5, 1.5, 'F');
-      }
-
-      const optColor = isPicked ? [251, 191, 36] : [140, 160, 180];
-      const letterLabel = letter + '. ';
-
-      doc.setFont('helvetica', isPicked ? 'bold' : 'normal');
-      doc.setFontSize(10);
-      doc.setTextColor(...optColor);
-      doc.text(letterLabel, margin + 10, y);
-
-      const optH = await addMixedText(opt, margin + 18, y, {
-        fontSize: 10,
-        color: optColor,
-        bold: isPicked,
-        maxW: contentW - 16
-      });
-      y += Math.max(optH, 5) + 1;
-    }
-
-    // Status badge
-    checkPageBreak(8);
-    y += 2;
-    if (isAnswered) {
-      doc.setFillColor(60, 50, 10);
-      doc.roundedRect(margin + 6, y - 4, 52, 6.5, 1.5, 1.5, 'F');
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8.5);
-      doc.setTextColor(251, 191, 36);
-      doc.text('Answered: ' + userAns, margin + 10, y);
-    } else if (isNA) {
-      doc.setFillColor(60, 50, 10);
-      doc.roundedRect(margin + 6, y - 4, 32, 6.5, 1.5, 1.5, 'F');
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8.5);
-      doc.setTextColor(251, 191, 36);
-      doc.text('Skipped (N/A)', margin + 10, y);
-    } else {
-      doc.setFont('helvetica', 'italic');
-      doc.setFontSize(8.5);
-      doc.setTextColor(90, 122, 154);
-      doc.text('Not Visited', margin + 10, y);
-    }
-
-    y += 7;
-
-    checkPageBreak(4);
-    doc.setDrawColor(20, 35, 60);
-    doc.setLineWidth(0.3);
-    doc.line(margin, y, pageW - margin, y);
-    y += 5;
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>${examName} — ${submittedName}</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Bengali:wght@400;600;700&family=Sora:wght@400;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body {
+    background: #060b14;
+    color: #e2eaf4;
+    font-family: 'Sora', 'Noto Sans Bengali', sans-serif;
+    padding: 0;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
-
-  // ---- Footer on each page ----
-  const totalPages = doc.internal.getNumberOfPages();
-  for (let p = 1; p <= totalPages; p++) {
-    doc.setPage(p);
-    doc.setFontSize(8);
-    doc.setTextColor(50, 80, 110);
-    doc.text('Mission2K27 — ' + submittedName, margin, pageH - 8);
-    doc.text('Page ' + p + ' of ' + totalPages, pageW - margin, pageH - 8, { align: 'right' });
+  .header {
+    background: #0d1829;
+    border-bottom: 1px solid #1e3050;
+    padding: 18px 24px 14px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
   }
+  .header-left h1 { font-size:16px; font-weight:700; color:#00e5ff; letter-spacing:-.3px; }
+  .header-left p  { font-size:11px; color:#5a7a9a; margin-top:3px; }
+  .stats-row {
+    display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end;
+  }
+  .stat { background:#111e33; border:1px solid #1e3050; border-radius:8px; padding:7px 12px; text-align:center; }
+  .stat .v { font-family:monospace; font-size:15px; font-weight:700; color:#00e5ff; display:block; }
+  .stat .l { font-size:9px; color:#5a7a9a; text-transform:uppercase; letter-spacing:.05em; }
+  .student-row {
+    padding: 12px 24px;
+    background: #060b14;
+    font-size: 12px;
+    color: #5a7a9a;
+    border-bottom: 1px solid #1e3050;
+  }
+  .student-row span { color:#e2eaf4; font-weight:600; }
+  .questions { padding: 16px 24px 40px; }
+  @media print {
+    body { background:#060b14 !important; }
+    @page { margin: 12mm; size: A4; }
+  }
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="header-left">
+    <h1>Mission2K27</h1>
+    <p>${examName}</p>
+  </div>
+  <div class="stats-row">
+    <div class="stat"><span class="v">${answeredCount}</span><span class="l">Answered</span></div>
+    <div class="stat"><span class="v">${skippedCount}</span><span class="l">Skipped</span></div>
+    <div class="stat"><span class="v">${totalCount}</span><span class="l">Total</span></div>
+    <div class="stat"><span class="v">${timeVal}</span><span class="l">Time</span></div>
+  </div>
+</div>
+<div class="student-row">Student: <span>${submittedName}</span></div>
+<div class="questions">${rows}</div>
+<script>window.onload = function(){ window.print(); }<\/script>
+</body>
+</html>`;
 
-  const safeName = submittedName.replace(/[^a-z0-9]/gi, '_');
-  const examSafe = (examData.examName || 'Exam').replace(/[^a-z0-9]/gi, '_');
-  doc.save(safeName + '_' + examSafe + '_responses.pdf');
+  const w = window.open('', '_blank');
+  if (!w) { alert('Popup blocked! Please allow popups for this site.'); return; }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
 }
 </script>
  
